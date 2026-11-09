@@ -37,6 +37,10 @@ both.
 | `brew install whisper-cpp` | `setup-voice` downloads whisper.cpp's Windows release and the speech model; on a PC with an NVIDIA GPU it installs the CUDA build |
 | Codex and Gemini CLI support | Not included. The fork follows Claude Code only. |
 
+The fork is versioned on its own, starting at 0.1.0. It was taken from upstream
+0.6.2 (glasses app 0.3.1) and does not track later upstream releases; see
+[CHANGELOG.md](CHANGELOG.md).
+
 The design, the decisions behind it and what the implementation found along the way
 are written up in [docs/windows-design.md](docs/windows-design.md). Two of those
 findings apply to upstream as well: a screen read taken while Claude Code's UI is

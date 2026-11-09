@@ -1,6 +1,6 @@
 {
   "name": "@gwro/glancecode-win",
-  "version": "0.6.2",
+  "version": "0.1.0",
   "description": "Drive your Claude Code sessions from Even Realities G2 smart glasses, natively on Windows: live transcript, approvals, and hold-to-talk voice.",
   "type": "module",
   "bin": {

@@ -1,70 +1,79 @@
 # Changelog
 
-This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
-Entries below the fork line are upstream's.
+GlanceCode for Windows is versioned on its own, starting at 0.1.0. It was forked
+from [GlanceCode](https://github.com/sousyllc/glancecode) 0.6.2 (glasses app 0.3.1)
+and does not track later upstream releases. Upstream's own history up to the fork
+is kept at the end for reference.
 
-## Unreleased (Windows fork, milestone 4)
+## 0.1.0
 
-- Keep-awake: while the hub runs and the PC is on AC power, a small helper holds
-  the system (not the display) awake, so the glasses never see a sleeping hub.
-  `preventSleep: false` turns it off.
-- `pair` draws the pairing code as a QR code in the terminal.
-- Fixed: a permission dialog read while Claude Code's UI was mid-redraw could miss
-  the first option and shift the rest, so a tap on "Yes" chose "Yes, and switch to
-  accept edits". Dialog reads now reject such gaps and wait for two matching reads.
-- A hub restarted (or started) while Claude Code was already waiting on a dialog
-  finds it on screen and shows it as waiting, rather than idle.
-- Checked in Even's simulator against this hub: session list, transcript, reply,
-  approval with the real options, New session in a recent project, and Resume of a
-  past session with its history.
+First release of the Windows port. Pre-release: exercised against a real hub on
+Windows 11 with Even's simulator for the glasses app, not yet with G2 glasses.
 
-## Unreleased (Windows fork, milestone 3)
+### Sessions
 
-- Voice. `glancecode setup-voice` downloads whisper.cpp's Windows build (the
-  `whisper-server.exe` from its release zip, pinned to a checked build) and the
-  speech model into `%LOCALAPPDATA%\glancecode`, resuming interrupted downloads.
-  On a PC with an NVIDIA GPU it installs the CUDA build, which transcribes a
-  sentence in about 70 ms instead of about real time on the CPU; `--cpu` and
-  `--cuda` choose. The hub warms the model up when it starts, so the first hold
-  to talk isn't the slow one. `whisperThreads` sizes the CPU build to the
-  machine. `doctor` reports the build and whether the server is up.
+- A **session host** replaces tmux: a small Node process runs Claude Code in a
+  ConPTY pseudo-console, keeps a headless terminal screen for it, and serves the
+  hub and the CLI over a user-private named pipe. It is started through a hidden
+  launcher so it belongs to no process tree: hub restarts leave sessions running
+  and the hub picks them up again, and the host exits by itself when its last
+  session ends.
+- `glancecode claude [args]` starts Claude Code in the host and attaches the
+  console; Ctrl+] or closing the window detaches; `attach` and `ls` work as
+  upstream's tmux versions do. The detach chord is recognised in the plain,
+  win32-input-mode and kitty keyboard encodings Windows terminals use.
+- Claude Code reports to the hub through a Node hook script run under PowerShell;
+  Git Bash is not required. Sessions started in a plain terminal appear view-only,
+  with Claude's process id resolved while the hook's shell is still alive.
+- Live transcript, approvals with the real option labels, questions, interrupt,
+  model switch and compact through the same hub API as upstream, so upstream's
+  Even Hub glasses app works unchanged. New session in a recent project and Resume
+  of a past session work from the glasses.
 
-## Unreleased (Windows fork, milestone 2)
+### Service
 
 - `glancecode service install|uninstall|restart|stop|status`: the hub as a Task
-  Scheduler task for the signed-in user, started at logon through a hidden
-  `wscript` launcher so no console window appears, restarted within a minute if
-  it fails, logging to `%LOCALAPPDATA%\glancecode\logs\hub.log`.
-- The session host is started through the same kind of launcher, so it is
-  nobody's child: stopping or restarting the hub service leaves the host and its
-  Claude Code sessions running, and the restarted hub picks them up again.
-- `doctor` reports the service, the host, the hook, Tailscale and HTTPS state;
-  `setup` runs the whole install.
+  Scheduler task for the signed-in user, started hidden at logon, restarted within
+  a minute if it fails, logging to `%LOCALAPPDATA%\glancecode\logs\hub.log`.
+- The PC is held awake (system, not display) while the hub runs on AC power;
+  `preventSleep: false` turns it off.
+- `doctor` reports Node, Claude Code, the hook, the host, the hub, the service,
+  whisper.cpp, Tailscale and HTTPS; `setup` runs the whole install; `pair` draws
+  the pairing code as a QR code.
 
-## Unreleased (Windows fork, milestone 1)
+### Voice
 
-- Windows native: no WSL, no tmux. A small **session host** runs Claude Code in a
-  ConPTY pseudo-console, keeps a headless terminal screen for it, and the hub and
-  the CLI reach it over a user-private named pipe. Hub restarts leave sessions
-  running, and the host exits by itself when its last session ends.
-- `glancecode claude [args]` starts Claude Code in the host and attaches this
-  console to it; closing the window or Ctrl+] detaches. `glancecode attach` and
-  `glancecode ls` work the same way as upstream's tmux versions.
-- The hub follows sessions through a Node hook script that Claude Code runs under
-  PowerShell (`bin/glancecode-hook.mjs`), on both host sessions and sessions
-  started in a plain terminal (view-only).
-- Live transcript, approvals with the real option labels, interrupt, model switch
-  and compact through the same hub API as upstream, so the Even Hub glasses app
-  is unchanged.
-- Config in `%APPDATA%\glancecode`, data and logs in `%LOCALAPPDATA%\glancecode`.
-- Removed: Codex and Gemini CLI support, tmux, launchd/systemd. Not yet ported:
-  `service` (Task Scheduler), `setup-voice` (whisper.cpp download), keep-awake.
-- Found along the way: Claude Code's menus ignore arrow keys that arrive through a
-  ConPTY input pipe but take vi keys, a lone Escape is delayed by conhost unless
-  sent as a win32-input-mode key record, and a session launched from inside
-  another Claude Code session inherits markers that turn off its transcript.
+- `glancecode setup-voice` downloads whisper.cpp's Windows release (pinned build)
+  and the speech model, resuming interrupted downloads. With an NVIDIA GPU it
+  installs the CUDA build, which transcribes a sentence in about 70 ms against
+  about real time on the CPU; `--cuda` and `--cpu` choose. The hub warms the
+  model up at start. `whisperThreads` sizes the CPU build to the machine.
+
+### Robustness
+
+- Dialog reads reject numbered lists with a gap (a read taken while Claude Code's
+  UI was mid-redraw) and wait for two matching reads, so a tap on "Yes" cannot
+  land on the next option.
+- A hub that starts while Claude Code is already waiting on a dialog finds it on
+  screen and reports it as waiting.
+- Claude Code's menus ignore arrow keys arriving through ConPTY, so menu
+  navigation uses vi keys and the trust dialog is confirmed only once "Yes" has
+  the focus. A bare Escape is sent as a win32-input-mode key record so conhost
+  delivers it at once. Nested-session markers inherited from a parent Claude Code
+  session are stripped from launched sessions.
+
+### Not included
+
+- Codex and Gemini CLI support, tmux, launchd and systemd.
+
+### Paths
+
+- Configuration in `%APPDATA%\glancecode`; speech model, whisper.cpp, logs and
+  launchers in `%LOCALAPPDATA%\glancecode`.
 
 ---
+
+## Upstream history (before the fork)
 
 ## 0.6.2
 
