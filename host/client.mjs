@@ -1,7 +1,7 @@
 // Client side of the session host: connect to its named pipe, start it when it
 // isn't running, and relay a console to a session (the `tmux attach` of this port).
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { connect as netConnect } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -71,16 +71,29 @@ function asCommand(path) {
   return { cmd: path, args: [], display: path };
 }
 
-/** Start the host detached and windowless, if the pipe doesn't answer. */
-export async function ensureHost(pipe = defaultPipe(), { logFile = null, timeoutMs = 6000 } = {}) {
+/**
+ * Start the host detached and windowless, if the pipe doesn't answer.
+ *
+ * On Windows the host is started through wscript.exe, which starts it hidden and
+ * exits at once, so the host is nobody's child: killing the hub's or the CLI's
+ * process tree (taskkill /T, a stopped service) leaves it, and the Claude Code
+ * sessions it holds, running. `launcherDir` is where that one-line script lives.
+ */
+export async function ensureHost(pipe = defaultPipe(), { logFile = null, launcherDir = null, timeoutMs = 6000 } = {}) {
   if (await pipeAnswers(pipe)) return false;
   if (logFile) mkdirSync(dirname(logFile), { recursive: true });
-  const child = spawn(process.execPath, [HOST_SCRIPT, "--pipe", pipe, ...(logFile ? ["--log", logFile] : [])], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  child.unref();
+  const args = [HOST_SCRIPT, "--pipe", pipe, ...(logFile ? ["--log", logFile] : [])];
+  if (process.platform === "win32" && launcherDir) {
+    mkdirSync(launcherDir, { recursive: true });
+    const launcher = join(launcherDir, "host-launcher.vbs");
+    const q = (s) => `""${String(s).replace(/"/g, '""')}""`;
+    writeFileSync(launcher, `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${[process.execPath, ...args].map(q).join(" ")}", 0, False\r\n`);
+    const wscript = join(process.env.SystemRoot || "C:\\Windows", "System32", "wscript.exe");
+    spawnSync(wscript, [launcher], { stdio: "ignore", windowsHide: true, timeout: 10000 });
+  } else {
+    const child = spawn(process.execPath, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+  }
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, 100));

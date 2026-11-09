@@ -9,9 +9,10 @@ no WSL, no tmux. It follows Claude Code only. The glasses app is upstream's,
 unchanged. GlanceCode is an independent project and isn't affiliated with Anthropic
 or Even Realities.
 
-Status: milestone 1 of the port (see `docs/windows-design.md`). Sessions, the live
-transcript, approvals, interrupt and model switching work through the hub API.
-Not ported yet: the background service, voice, keep-awake.
+Status: milestones 1 and 2 of the port (see `docs/windows-design.md`). Sessions,
+the live transcript, approvals, interrupt and model switching work through the hub
+API; the hub runs as a Task Scheduler task that starts at logon. Not ported yet:
+voice, keep-awake.
 
 ## How it works
 
@@ -76,16 +77,18 @@ git clone <this repo>
 cd wglancecode
 npm install
 npm run build:app
-node bin\glancecode install      # adds the hook to %USERPROFILE%\.claude\settings.json
-node bin\glancecode hub          # run the hub in this window (the service comes in milestone 2)
+node bin\glancecode setup
 ```
 
-Then, in another window, serve the hub over HTTPS and pair:
+`setup` checks the requirements, adds the hook to `%USERPROFILE%\.claude\settings.json`,
+registers the hub as a Task Scheduler task that starts at logon and restarts if it
+fails, serves it over HTTPS on your `*.ts.net` name, and prints a pairing code. The
+pieces are also separate commands: `install`, `service install`, `serve`, `pair`.
+`doctor` says which ones are missing.
 
-```powershell
-node bin\glancecode serve
-node bin\glancecode pair
-```
+HTTPS needs certificates turned on for your tailnet, one click at
+[login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns); `serve`
+tells you when that's the only thing in the way.
 
 Install **GlanceCode** from Even Hub in the Even Realities app, open it, and paste
 the pairing code on the phone screen.
@@ -122,6 +125,10 @@ At your desk:
 | `glancecode status` | hub and sessions |
 | `glancecode doctor` | check every piece and say what to fix |
 | `glancecode pair` | print the pairing code again |
+| `glancecode service restart` | restart the hub; running sessions are untouched |
+
+The hub's log is at `%LOCALAPPDATA%\glancecode\logs\hub.log`, the session host's
+next to it.
 
 ## Security
 
@@ -159,7 +166,7 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 - The G2 display has one font weight, so markdown is shown as plain text.
 - Sessions must be started with `glancecode claude` for the glasses to type into
   them.
-- Background service, voice and keep-awake are not ported yet.
+- Voice and keep-awake are not ported yet.
 
 ## Development
 

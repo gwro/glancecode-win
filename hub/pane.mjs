@@ -190,7 +190,7 @@ export async function listOurSessions(pipe = HOST_PIPE) {
 export async function launchClaude({ cwd, args = [], claudeBin = "claude", env = {}, pipe = HOST_PIPE }) {
   const claude = resolveClaude(claudeBin);
   if (!claude) throw Object.assign(new Error("Claude Code not found on PATH"), { status: 503 });
-  await ensureHost(pipe, { logFile: HOST_LOG });
+  await ensureHost(pipe, { logFile: HOST_LOG, launcherDir: DATA_DIR });
   const taken = new Set((await listOurSessions(pipe)).map((s) => s.name));
   const name = sessionNameFor(cwd, taken);
   const r = await clientFor(pipe).request("new", { name, cwd, cmd: claude.cmd, args: [...claude.args, ...args], env, cols: 200, rows: 50 });

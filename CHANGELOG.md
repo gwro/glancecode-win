@@ -3,6 +3,18 @@
 This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
 Entries below the fork line are upstream's.
 
+## Unreleased (Windows fork, milestone 2)
+
+- `glancecode service install|uninstall|restart|stop|status`: the hub as a Task
+  Scheduler task for the signed-in user, started at logon through a hidden
+  `wscript` launcher so no console window appears, restarted within a minute if
+  it fails, logging to `%LOCALAPPDATA%\glancecode\logs\hub.log`.
+- The session host is started through the same kind of launcher, so it is
+  nobody's child: stopping or restarting the hub service leaves the host and its
+  Claude Code sessions running, and the restarted hub picks them up again.
+- `doctor` reports the service, the host, the hook, Tailscale and HTTPS state;
+  `setup` runs the whole install.
+
 ## Unreleased (Windows fork, milestone 1)
 
 - Windows native: no WSL, no tmux. A small **session host** runs Claude Code in a

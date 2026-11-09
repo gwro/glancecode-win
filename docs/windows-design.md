@@ -413,3 +413,20 @@ Things the implementation learned that the design above didn't predict:
   `"shell": "powershell"`, `async: true`, `timeout: 10`. For testing without
   touching `%USERPROFILE%\.claude\settings.json`, the same entry in a scratch
   project's `.claude\settings.json` works.
+
+## What milestone 2 found
+
+- **Task Scheduler and process trees.** The task's action is `wscript.exe` running
+  a script that starts the hub hidden and waits for it, so Task Scheduler sees the
+  hub's exit code and restarts it on failure. `schtasks /End` plus stopping the hub
+  process does not reach the host when the host was started through its own
+  non-waiting `wscript` launcher: after `service stop` the host and its Claude
+  session were still there, and the restarted hub listed the session as
+  controllable again from `sessions.json`. The job-object worry in the design
+  didn't materialise.
+- The task runs with the interactive token and least privilege, no stored
+  password; `Get-ScheduledTask` through PowerShell gives a locale-independent
+  status.
+- Tailscale on this machine installs to `C:\Program Files\Tailscale` without
+  adding itself to PATH, so the CLI looks there. HTTPS certificates are a tailnet
+  setting the user has to flip once in the admin console; `serve` says so.

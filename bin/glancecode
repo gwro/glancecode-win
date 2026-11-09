@@ -9,8 +9,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Windows absolute paths are not import specifiers; go through file:// URLs.
 const load = (...p) => import(pathToFileURL(join(ROOT, ...p)).href);
 const { BRAND } = await load("hub", "brand.mjs");
-const { CLAUDE_SETTINGS, LOG_DIR, loadConfig, tailscaleAddress } = await load("hub", "config.mjs");
+const { CLAUDE_SETTINGS, DATA_DIR, LOG_DIR, loadConfig, tailscaleAddress } = await load("hub", "config.mjs");
 const { HostClient, attach, ensureHost, pipeAnswers, resolveClaude } = await load("host", "client.mjs");
+const { TASK_NAME, installFileLogger, installService, serviceStatus, startService, stopService, uninstallService } = await load("hub", "service.mjs");
 const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
 const CLI = BRAND.name;
@@ -69,6 +70,12 @@ const commands = {
     } catch {
       warn(`hub not running: ${CLI} service install (or ${CLI} hub)`);
     }
+    if (WIN) {
+      const st = serviceStatus();
+      if (!st.installed) info(`hub service not installed, so the hub won't start at logon: ${CLI} service install`);
+      else if (st.state === "Running") ok("hub service running (Task Scheduler)");
+      else warn(`hub service is ${st.state}: ${CLI} service restart`);
+    }
     existsSync(cfg.whisperModel) ? ok("speech model present") : warn(`speech model missing: ${CLI} setup-voice`);
     const ts = tailscaleStatus();
     if (!ts) warn("Tailscale not running on this machine");
@@ -82,8 +89,11 @@ const commands = {
 
   // ---------- hub ----------
   hub() {
+    // --service: started hidden by Task Scheduler, so log to a file and skip the terminal feed.
+    const service = rest.includes("--service");
+    if (service) installFileLogger(join(LOG_DIR, "hub.log"));
     return load("hub", "server.mjs").then(({ startHub }) => {
-      const hub = startHub();
+      const hub = startHub({ feed: !service });
       const stop = () => {
         hub.close();
         process.exit(0);
@@ -121,7 +131,7 @@ const commands = {
     }
     const cfg = loadConfig();
     const cwd = process.cwd();
-    await ensureHost(cfg.hostPipe, { logFile: join(LOG_DIR, "host.log") });
+    await ensureHost(cfg.hostPipe, { logFile: join(LOG_DIR, "host.log"), launcherDir: DATA_DIR });
     const host = new HostClient(cfg.hostPipe);
     const { id, name } = await host.request("new", {
       name: basename(cwd),
@@ -218,9 +228,46 @@ const commands = {
 
   // ---------- service ----------
   service(sub = rest[0] || "status") {
-    // Task Scheduler support lands in the next milestone.
-    warn(`\`${CLI} service ${sub}\` isn't available yet on Windows. Run the hub in a terminal for now: ${CLI} hub`);
-    return false;
+    if (!WIN) {
+      warn("the background service uses Task Scheduler, so it is Windows only");
+      return false;
+    }
+    if (sub === "install") {
+      try {
+        installService({ nodePath: process.execPath, cliPath: join(ROOT, "bin", CLI), dataDir: DATA_DIR });
+        ok(`hub service installed and started (Task Scheduler task "${TASK_NAME}"; logs: ${join(LOG_DIR, "hub.log")})`);
+        return true;
+      } catch (err) {
+        warn(err.message);
+        return false;
+      }
+    }
+    if (sub === "uninstall") {
+      uninstallService() ? ok("hub service removed") : warn("no hub service was installed");
+      return true;
+    }
+    if (sub === "restart") {
+      stopService({ quiet: true });
+      try {
+        startService();
+        ok("restarted");
+      } catch (err) {
+        warn(err.message);
+      }
+      return true;
+    }
+    if (sub === "stop") {
+      stopService();
+      ok(`stopped; it starts again at logon (\`${CLI} service uninstall\` removes it)`);
+      return true;
+    }
+    const st = serviceStatus();
+    if (!st.installed) {
+      console.log(`not installed (${CLI} service install)`);
+      return false;
+    }
+    console.log(`${st.state}${st.lastRun && !/^0001/.test(st.lastRun) ? `, last run ${st.lastRun}` : ""}${st.lastResult ? ` (last result ${st.lastResult})` : ""}`);
+    return st.state === "Running";
   },
 
   // ---------- HTTPS through tailscale serve ----------
@@ -307,7 +354,7 @@ Sessions
 
 Pieces
   ${CLI} install|uninstall  add or remove the Claude Code hook
-  ${CLI} service [install|uninstall|restart|status]
+  ${CLI} service [install|uninstall|restart|stop|status]   hub as a Task Scheduler task that starts at logon
   ${CLI} serve [on|off|status]   HTTPS on your *.ts.net name through tailscale serve
   ${CLI} hub                run the hub in the foreground
   ${CLI} setup-voice        download the local speech model`);

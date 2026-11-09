@@ -23,12 +23,26 @@ your user settings.
 
 ## Testing the glasses app without glasses
 
+The Even Hub simulator runs the glasses app on the PC. Pointed at the hub's own
+copy of the app with the hub address and token in the URL, it shows your real
+sessions, so the whole stack short of the hardware can be tested:
+
+```powershell
+npm run build:app
+$cfg = Get-Content "$env:APPDATA\glancecode\config.json" | ConvertFrom-Json
+npx @evenrealities/evenhub-simulator --automation-port 9898 "http://127.0.0.1:7717/?hub=http%3A%2F%2F127.0.0.1%3A7717&token=$($cfg.token)"
+```
+
+For the demo data, or the app from Vite with live reload:
+
 ```powershell
 cd app; npx vite --host 127.0.0.1
 npx @evenrealities/evenhub-simulator --automation-port 9898 "http://127.0.0.1:5173/?demo"
 ```
 
-The simulator's automation API takes input and screenshots:
+The simulator's automation API takes input and screenshots. Actions are `up`,
+`down`, `click`, `double_click`, `long_press`, `long_press_release` and
+`context_menu`; `/api/console` returns the app's console output:
 
 ```powershell
 curl.exe -X POST 127.0.0.1:9898/api/input -H "Content-Type: application/json" -d "{\"action\":\"click\"}"
