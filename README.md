@@ -1,29 +1,61 @@
 # GlanceCode for Windows
 
-Drive your Claude Code sessions from Even Realities G2 glasses, from a Windows PC.
-See the live transcript, approve tool calls, answer questions, and hold to talk.
-Everything runs on your own computer.
+> **Untested on real glasses, provided as-is.** This port has been exercised
+> against a real hub on Windows 11 using Even's simulator for the glasses app, but
+> it has not yet been used with G2 glasses. It comes with no guarantees or
+> support; use it at your own risk, as the [MIT license](LICENSE) states.
 
-This is a Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode):
-no WSL, no tmux. It follows Claude Code only. The glasses app is upstream's,
-unchanged. GlanceCode is an independent project and isn't affiliated with Anthropic
-or Even Realities.
+A Windows-native port of [GlanceCode](https://github.com/sousyllc/glancecode):
+drive your Claude Code sessions from Even Realities G2 glasses. See the live
+transcript, approve tool calls, answer questions, and hold to talk. Everything runs
+on your own PC and your own Tailscale network.
 
-Status: the port is complete (milestones 1 to 4, see `docs/windows-design.md`).
-Sessions, the live transcript, approvals, interrupt and model switching work
-through the hub API; the hub runs as a Task Scheduler task that starts at logon and
-keeps the PC awake; hold to talk is transcribed locally with whisper.cpp. Every
-glasses screen has been exercised in Even's simulator against this hub; the real
-glasses are the remaining test.
+GlanceCode is an independent project by [sousy](https://github.com/sousyllc). This
+fork adapts its hub and command-line tool to Windows; the glasses app is upstream's,
+unchanged, and pairs with this hub as it would with the original. Neither project is
+affiliated with Anthropic, Even Realities or Microsoft.
+
+## About this fork
+
+Upstream GlanceCode runs on macOS and Linux and relies on tmux to hold each Claude
+Code session, type into it and read its screen; on launchd or systemd for the
+background service; and on Homebrew for whisper.cpp. None of those exist on Windows,
+and running them through WSL would put Claude Code in a different operating system
+from your editor and your files.
+
+This fork replaces each of those pieces with its Windows equivalent and keeps
+everything else: the hub's HTTP API, the session model, the transcript reader and
+the glasses app are the same as upstream's, so the same Even Hub app works with
+both.
+
+| Upstream | This fork |
+|---|---|
+| tmux server, `send-keys`, `capture-pane` | A **session host**: a small Node process that runs Claude Code in a Windows pseudo-console (ConPTY), keeps a headless copy of its screen, and serves the hub and the CLI over a user-private named pipe |
+| `glancecode-hook` (bash + curl) | A Node script that Claude Code runs under PowerShell; no Git Bash required |
+| launchd / systemd user service | A Task Scheduler task for the signed-in user, started hidden at logon, restarted on failure, logging to `%LOCALAPPDATA%\glancecode\logs` |
+| `caffeinate` | A helper holding the system awake (not the display) while on AC power |
+| `brew install whisper-cpp` | `setup-voice` downloads whisper.cpp's Windows release and the speech model; on a PC with an NVIDIA GPU it installs the CUDA build |
+| Codex and Gemini CLI support | Not included. The fork follows Claude Code only. |
+
+The design, the decisions behind it and what the implementation found along the way
+are written up in [docs/windows-design.md](docs/windows-design.md). Two of those
+findings apply to upstream as well: a screen read taken while Claude Code's UI is
+mid-redraw can miss a line of a numbered dialog, and a hub that starts while Claude
+is already waiting on a dialog should find it on screen. Both are handled here.
+
+**Status.** The port is feature-complete. Sessions, the live transcript, approvals
+with the real option labels, interrupt, model switching, new and resumed sessions,
+the background service and hold to talk have all been exercised against a real hub
+on Windows 11, using Even's simulator for the glasses app. Testing on the glasses
+themselves is the remaining step.
 
 ## How it works
 
-Every session is ordinary Claude Code running inside a small **session host**, the
-way upstream runs it inside tmux. The host runs Claude Code in a Windows
-pseudo-console (ConPTY), keeps a copy of its screen, and lets the hub type into it
-and read it back. The hub follows your sessions through Claude Code hooks and their
-transcript files. The glasses app talks only to the hub, over your private
-Tailscale network.
+Every session is ordinary Claude Code running inside the session host, the way
+upstream runs it inside tmux. The host runs Claude Code in a pseudo-console, keeps a
+copy of its screen, and lets the hub type into it and read it back. The hub follows
+your sessions through Claude Code hooks and their transcript files. The glasses app
+talks only to the hub, over your private Tailscale network.
 
 ```
 claude.exe (in ConPTY) ◀── keys ─── session host ◀── named pipe ──┬── glancecode claude / attach (your terminal)
@@ -33,19 +65,19 @@ claude.exe (in ConPTY) ◀── keys ─── session host ◀── named pip
 ```
 
 Claude Code itself is never replaced or modified, so your model, permission mode,
-background tasks and Remote Control keep working. There's only ever one Claude
+background tasks and Remote Control keep working. There is only ever one Claude
 process per session, and the terminal and the glasses see the same conversation.
-The host is separate from the hub, so restarting or upgrading the hub leaves your
-sessions running.
+The host is a separate process from the hub, so restarting or upgrading the hub
+leaves your sessions running, and the hub picks them up again when it comes back.
 
 ## What you get on the glasses
 
-- A list of every Claude Code session on your computer, with live state: working,
-  idle, or waiting for you.
+- A list of every Claude Code session on your PC, with live state: working, idle,
+  or waiting for you.
 - The live transcript of any session: prompts, replies, progress notes and tool
-  calls, pixel-wrapped for the G2 display.
+  calls, wrapped for the G2 display.
 - Approvals and questions with the exact options the session is offering. Keys are
-  only pressed after that dialog is read back from the terminal.
+  only pressed after that dialog has been read back from the terminal.
 - Start a new session in a recent project, or resume a past session.
 - A menu to interrupt, compact, or switch the session's model without changing
   your default.
@@ -53,35 +85,33 @@ sessions running.
 
 ## Requirements
 
-On your PC (Windows 10 1809 or newer, Windows 11 recommended):
+On your PC (Windows 10 version 1809 or newer; Windows 11 recommended):
 
-- Node 20 or newer
+- Node.js 20 or newer
 - [Claude Code](https://claude.com/claude-code), signed in. The native installer,
-  WinGet and npm installs all work.
+  WinGet and npm installs all work. Git for Windows is not required.
 - [Tailscale](https://tailscale.com/download/windows), signed in, with HTTPS
-  certificates turned on for your tailnet at
+  certificates enabled for your tailnet at
   [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns)
 - Optional, for voice: nothing to install by hand. `glancecode setup-voice`
-  downloads whisper.cpp's Windows build and the speech model (about 550 MB) into
-  `%LOCALAPPDATA%\glancecode`. On a PC with an NVIDIA GPU it takes the CUDA build
-  (about 685 MB, runtime included; needs only the normal driver), which
-  transcribes a sentence in under a tenth of a second; the CPU build (9 MB,
-  `--cpu`) takes about as long as the speech itself. It's free, open source and
-  runs offline, so there's no API key or subscription. Without it, everything
-  except hold to talk still works.
-
-Git for Windows is not needed. The hook runs under PowerShell.
+  downloads whisper.cpp and the speech model (about 550 MB) into
+  `%LOCALAPPDATA%\glancecode`. With an NVIDIA GPU it takes the CUDA build (about
+  685 MB, runtime included; only the normal driver is needed), which transcribes a
+  sentence in under a tenth of a second. The CPU build (`--cpu`) takes about as
+  long as the speech itself. Transcription is local and offline; there is no API
+  key or subscription. Without it, everything except hold to talk still works.
 
 On your phone:
 
 - The Even Realities app, paired with your G2 glasses
-- Tailscale for iPhone or Android, signed in to the same Tailscale account as
-  your PC
+- Tailscale for iPhone or Android, signed in to the same Tailscale account as the PC
 
-## Install (from this checkout, for now)
+## Install
+
+From a checkout of this repository, in PowerShell:
 
 ```powershell
-git clone <this repo>
+git clone <this repository>
 cd wglancecode
 npm install
 npm run build:app
@@ -89,17 +119,13 @@ node bin\glancecode setup
 ```
 
 `setup` checks the requirements, adds the hook to `%USERPROFILE%\.claude\settings.json`,
-registers the hub as a Task Scheduler task that starts at logon and restarts if it
-fails, serves it over HTTPS on your `*.ts.net` name, and prints a pairing code. The
-pieces are also separate commands: `install`, `service install`, `serve`, `pair`.
-`doctor` says which ones are missing.
+registers the hub as a Task Scheduler task that starts at logon, serves it over
+HTTPS on your `*.ts.net` name, downloads the speech model, and prints a pairing
+code. Each step is also its own command (`install`, `service install`, `serve`,
+`setup-voice`, `pair`), and `doctor` reports which pieces are missing.
 
-HTTPS needs certificates turned on for your tailnet, one click at
-[login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns); `serve`
-tells you when that's the only thing in the way.
-
-Install **GlanceCode** from Even Hub in the Even Realities app, open it, and paste
-the pairing code on the phone screen.
+Then install **GlanceCode** from Even Hub in the Even Realities app, open it, and
+paste the pairing code on the phone screen, or scan the QR code that `pair` prints.
 
 To let the glasses drive a session you start at your desk, start it through the
 host:
@@ -110,7 +136,11 @@ node bin\glancecode claude       # takes the same arguments as claude
 
 Sessions started any other way still appear on the glasses, marked view only.
 Closing the terminal window only detaches; the session keeps running and
-`glancecode attach` opens it again. Ctrl+] detaches on purpose.
+`glancecode attach` opens it again. Ctrl+] detaches deliberately.
+
+To have `glancecode` on your PATH instead of `node bin\glancecode`, run
+`npm install -g .` from the checkout. The installed service keeps working, since it
+refers to the checkout by absolute path.
 
 ## Using it
 
@@ -132,11 +162,12 @@ At your desk:
 | `glancecode feed` | a readable live feed of every session |
 | `glancecode status` | hub and sessions |
 | `glancecode doctor` | check every piece and say what to fix |
-| `glancecode pair` | print the pairing code again, with a QR code to scan with the phone camera |
+| `glancecode pair` | print the pairing code and its QR code |
 | `glancecode service restart` | restart the hub; running sessions are untouched |
+| `glancecode setup-voice [--cuda\|--cpu]` | install or switch the whisper.cpp build |
 
-The hub's log is at `%LOCALAPPDATA%\glancecode\logs\hub.log`, the session host's
-next to it.
+Logs are in `%LOCALAPPDATA%\glancecode\logs`: `hub.log` for the hub and `host.log`
+for the session host.
 
 ## Security
 
@@ -148,6 +179,7 @@ next to it.
 - The hook port accepts connections from 127.0.0.1 only.
 - The session host listens on a named pipe that only your Windows user can open.
   It never listens on the network.
+- Voice is transcribed on your PC. Audio is not sent anywhere else.
 
 See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 
@@ -163,43 +195,55 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 | `hostPipe` | `\\.\pipe\glancecode-host-<user>` | the session host's named pipe |
 | `claudeArgs` | `[]` | extra arguments for sessions started from the glasses |
 | `whisperBin` | `%LOCALAPPDATA%\glancecode\whisper\whisper-server.exe` | whisper.cpp server, as installed by `setup-voice`; point it at your own build to use that instead |
-| `whisperThreads` | half the logical CPUs, 2 to 8 | CPU threads for transcription |
+| `whisperThreads` | half the logical CPUs, 2 to 8 | CPU threads for transcription (CPU build) |
 | `sttVocabulary` | | words the speech model should expect |
 | `ntfyTopic` | empty | optional phone push through ntfy when a session finishes or needs you |
-| `bindTailscaleIP` | false | also listen on the raw Tailscale IP over plain HTTP, for development |
 | `preventSleep` | true | keep the PC awake (not the display) while the hub runs and the PC is on AC power |
+| `bindTailscaleIP` | false | also listen on the raw Tailscale IP over plain HTTP, for development |
 
 ## Limitations
 
-- Even Hub apps only run while they're open on the glasses. To hear about a
+- Even Hub apps only run while they are open on the glasses. To hear about a
   session while another app is open, set `ntfyTopic`.
 - The G2 display has one font weight, so markdown is shown as plain text.
 - Sessions must be started with `glancecode claude` for the glasses to type into
-  them.
-- Voice on the CPU build is about real time, so the live preview while holding
-  lags behind speech. The CUDA build (`setup-voice --cuda`) doesn't. AMD and
-  Intel GPUs have no prebuilt whisper.cpp server; `whisperBin` can point at your
-  own build.
+  them. Others are view only.
+- Voice on the CPU build runs at about real time, so the live preview while holding
+  lags behind speech; the CUDA build does not. There is no prebuilt whisper.cpp
+  server for AMD or Intel GPUs, but `whisperBin` can point at your own build.
+- Codex and Gemini CLI, which upstream supports, are not included.
 
 ## Development
 
 ```powershell
+npm install
 npm run build:app          # build the glasses app
 npm test                   # hub, host and app tests
 node bin\glancecode hub    # run the hub in the foreground
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for testing with a scratch config and
-[docs/windows-design.md](docs/windows-design.md) for the design.
+The hub itself has no runtime dependencies, as upstream's doesn't. The session host
+uses two: `@lydell/node-pty` for ConPTY, which ships prebuilt binaries for x64 and
+ARM64 Windows, and `@xterm/headless` for the screen buffer. The CLI uses
+`qrcode-terminal` for the pairing code.
 
-## Credits
+[CONTRIBUTING.md](CONTRIBUTING.md) covers testing against a scratch configuration
+and driving the glasses app in Even's simulator without hardware.
+[docs/windows-design.md](docs/windows-design.md) is the design and the record of
+what each stage of the port found.
 
-Upstream [GlanceCode](https://github.com/sousyllc/glancecode) by sousy, with ideas
-from [cc-g2](https://github.com/wmoto-ai/cc-g2) and
-[claude-code-g2](https://github.com/sam-siavoshian/claude-code-g2), and Even
-Realities' [templates](https://github.com/even-realities/evenhub-templates). All
-MIT licensed.
+## Acknowledgements
+
+This fork exists because of [GlanceCode](https://github.com/sousyllc/glancecode) by
+[sousy](https://github.com/sousyllc), whose hub design, transcript reader and
+glasses app are used here with gratitude. Upstream in turn credits
+[cc-g2](https://github.com/wmoto-ai/cc-g2),
+[claude-code-g2](https://github.com/sam-siavoshian/claude-code-g2) and Even
+Realities' [templates](https://github.com/even-realities/evenhub-templates). The
+Windows port adds [node-pty](https://github.com/lydell/node-pty) by Simon Lydell,
+[xterm.js](https://github.com/xtermjs/xterm.js) and
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp). All MIT licensed.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), as upstream.
