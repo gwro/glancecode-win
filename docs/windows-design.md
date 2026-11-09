@@ -430,3 +430,29 @@ Things the implementation learned that the design above didn't predict:
 - Tailscale on this machine installs to `C:\Program Files\Tailscale` without
   adding itself to PATH, so the CLI looks there. HTTPS certificates are a tailnet
   setting the user has to flip once in the admin console; `serve` says so.
+
+## What milestone 3 found
+
+- whisper.cpp's build-tagged release `b5454` ships `whisper-bin-x64.zip` and an
+  arm64 CPU zip with `whisper-server.exe` under `Release/`, plus every `ggml-cpu-*`
+  DLL for the CPU features it was built for; the server picks the right one at
+  run time. `setup-voice` keeps the server and the DLLs and drops the other tools.
+  Downloads resume from a `.part` file; GitHub and Hugging Face both honour Range.
+- First transcription on this PC: the hub starts the server and the model loads in
+  under a second of extra latency; a 5-second sentence from Windows text-to-speech
+  came back word for word. CPU transcription runs at roughly real time on 6
+  threads, so the live preview while holding lags behind speech. `whisperThreads`
+  sizes the thread count to the machine; a CUDA build of whisper.cpp (set
+  `whisperBin`) is the real fix on an NVIDIA PC, and could become
+  `setup-voice --cuda` once the CUDA runtime DLL question is settled.
+- Windows Defender let the unsigned `whisper-server.exe` run from
+  `%LOCALAPPDATA%` without a prompt.
+- **CUDA.** The `whisper-bin-win-cuda-12.4.0-x64.zip` asset (685 MB) bundles
+  cudart, cublas and nvrtc, so it runs with just the NVIDIA driver. On this PC's
+  RTX 5090 the first inference ever took 33 s (kernel compilation for the card,
+  which the driver then caches: the next server start warmed up in 2 s), the
+  rest 70 ms, against 4.6 s on 8 CPU threads. The hub runs a one-second silent
+  inference when the server comes up, so whatever that cost is lands at hub start.
+  `setup-voice` picks CUDA when `nvidia-smi.exe` is in System32; `--cpu` and
+  `--cuda` override, and switching builds stops the running server first (its
+  files are locked while it runs).

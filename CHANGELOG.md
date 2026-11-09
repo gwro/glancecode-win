@@ -3,6 +3,17 @@
 This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
 Entries below the fork line are upstream's.
 
+## Unreleased (Windows fork, milestone 3)
+
+- Voice. `glancecode setup-voice` downloads whisper.cpp's Windows build (the
+  `whisper-server.exe` from its release zip, pinned to a checked build) and the
+  speech model into `%LOCALAPPDATA%\glancecode`, resuming interrupted downloads.
+  On a PC with an NVIDIA GPU it installs the CUDA build, which transcribes a
+  sentence in about 70 ms instead of about real time on the CPU; `--cpu` and
+  `--cuda` choose. The hub warms the model up when it starts, so the first hold
+  to talk isn't the slow one. `whisperThreads` sizes the CPU build to the
+  machine. `doctor` reports the build and whether the server is up.
+
 ## Unreleased (Windows fork, milestone 2)
 
 - `glancecode service install|uninstall|restart|stop|status`: the hub as a Task

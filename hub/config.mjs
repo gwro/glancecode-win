@@ -1,7 +1,7 @@
 // Hub configuration and on-disk locations.
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, networkInterfaces } from "node:os";
+import { cpus, homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { BRAND, env } from "./brand.mjs";
 import { defaultPipe } from "../host/client.mjs";
@@ -34,6 +34,8 @@ const DEFAULTS = {
   hostPipe: defaultPipe(),
   whisperBin: WIN ? join(DATA_DIR, "whisper", "whisper-server.exe") : "whisper-server",
   whisperModel: join(DATA_DIR, "models", "ggml-large-v3-turbo-q5_0.bin"),
+  // CPU threads for whisper-server: about the physical cores, capped so the PC stays usable.
+  whisperThreads: Math.max(2, Math.min(8, Math.floor(cpus().length / 2))),
   // Words whisper should expect: project names get appended at runtime.
   sttVocabulary: "Claude, Claude Code, Opus, Sonnet, Haiku, commit, deploy, npm, git",
   // Optional phone push through ntfy (https://ntfy.sh). Off unless a topic is set.

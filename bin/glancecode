@@ -77,6 +77,15 @@ const commands = {
       else warn(`hub service is ${st.state}: ${CLI} service restart`);
     }
     existsSync(cfg.whisperModel) ? ok("speech model present") : warn(`speech model missing: ${CLI} setup-voice`);
+    const voiceReady = existsSync(cfg.whisperModel) && (/[\\/]/.test(cfg.whisperBin) ? existsSync(cfg.whisperBin) : commandExists(cfg.whisperBin));
+    if (voiceReady) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${cfg.whisperPort}/`, { signal: AbortSignal.timeout(1500) });
+        res.status < 500 ? ok(`whisper-server running on 127.0.0.1:${cfg.whisperPort}`) : warn(`whisper-server answered ${res.status}`);
+      } catch {
+        info("whisper-server not running; the hub starts it on the first hold to talk");
+      }
+    }
     const ts = tailscaleStatus();
     if (!ts) warn("Tailscale not running on this machine");
     else {
@@ -325,12 +334,50 @@ const commands = {
   // ---------- voice ----------
   async "setup-voice"() {
     const cfg = loadConfig();
-    if (existsSync(cfg.whisperModel) && (!/[\\/]/.test(cfg.whisperBin) || existsSync(cfg.whisperBin))) {
+    const { formatProgress, hasNvidiaGpu, installModel, installWhisper, installedWhisper, WHISPER_BUILD } = await load("hub", "voice.mjs");
+    const progress = (label) => (done, total) => {
+      if (process.stdout.isTTY) process.stdout.write(`\r    ${label}: ${formatProgress(done, total)}   `);
+    };
+    const endLine = () => process.stdout.isTTY && process.stdout.write("\n");
+    const binIsPath = /[\\/]/.test(cfg.whisperBin);
+    // --cuda / --cpu pick the whisper.cpp build; by default an NVIDIA PC gets CUDA.
+    const cuda = rest.includes("--cuda") ? true : rest.includes("--cpu") ? false : hasNvidiaGpu();
+    const have = binIsPath ? installedWhisper(dirname(cfg.whisperBin)) : null;
+    const explicit = rest.includes("--cuda") || rest.includes("--cpu");
+    const wantSwitch = binIsPath && existsSync(cfg.whisperBin) && explicit && (have?.cuda ?? false) !== cuda;
+    if (binIsPath && (!existsSync(cfg.whisperBin) || wantSwitch)) {
+      if (!WIN) {
+        warn(`whisper-server not found at ${cfg.whisperBin}; install whisper.cpp and set whisperBin`);
+        return false;
+      }
+      try {
+        info(cuda ? "NVIDIA GPU found: installing whisper.cpp's CUDA build (about 685 MB); --cpu picks the CPU build" : "installing whisper.cpp's CPU build (about 9 MB)");
+        const { files, asset } = await installWhisper(dirname(cfg.whisperBin), { cuda, onProgress: progress("whisper.cpp"), log: info });
+        endLine();
+        ok(`whisper.cpp ${WHISPER_BUILD} installed from ${asset} (${files} files in ${dirname(cfg.whisperBin)})`);
+      } catch (err) {
+        endLine();
+        warn(`whisper.cpp download failed: ${err.message}; run setup-voice again later`);
+        return false;
+      }
+    } else if (binIsPath) ok(`whisper.cpp present (${have?.cuda ? "CUDA" : "CPU"} build, ${cfg.whisperBin})`);
+    else if (commandExists(cfg.whisperBin)) ok(`whisper.cpp found on PATH (${cfg.whisperBin})`);
+    else warn(`${cfg.whisperBin} not found on PATH`);
+    if (existsSync(cfg.whisperModel)) {
       ok(`speech model present (${basename(cfg.whisperModel)})`);
-      return;
+      return true;
     }
-    // Downloading whisper.cpp's Windows build and the model lands in a later milestone.
-    warn("voice setup isn't available yet on Windows; hold to talk stays off for now");
+    try {
+      info(`the speech model is about 550 MB`);
+      await installModel(cfg.whisperModel, { onProgress: progress("speech model"), log: info });
+      endLine();
+      ok("speech model downloaded");
+      return true;
+    } catch (err) {
+      endLine();
+      warn(`model download failed: ${err.message}; run setup-voice again to resume`);
+      return false;
+    }
   },
 
   version() {
@@ -357,7 +404,7 @@ Pieces
   ${CLI} service [install|uninstall|restart|stop|status]   hub as a Task Scheduler task that starts at logon
   ${CLI} serve [on|off|status]   HTTPS on your *.ts.net name through tailscale serve
   ${CLI} hub                run the hub in the foreground
-  ${CLI} setup-voice        download the local speech model`);
+  ${CLI} setup-voice        download whisper.cpp (--cuda or --cpu) and the local speech model`);
   },
 };
 
@@ -403,7 +450,7 @@ async function checkPrerequisites() {
     blocking = true;
   }
   const cfg = loadConfig();
-  existsSync(cfg.whisperBin) || commandExists(cfg.whisperBin) ? ok("whisper.cpp found") : warn(`whisper.cpp not found (optional, for voice): ${CLI} setup-voice`);
+  commandExists(cfg.whisperBin) ? ok("whisper.cpp found") : warn(`whisper.cpp not found (optional, for voice): ${CLI} setup-voice`);
   tailscaleStatus() ? ok("Tailscale running") : warn("Tailscale not running (needed for the phone to reach this machine)");
   return { blocking };
 }

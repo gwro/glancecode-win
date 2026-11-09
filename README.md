@@ -9,10 +9,10 @@ no WSL, no tmux. It follows Claude Code only. The glasses app is upstream's,
 unchanged. GlanceCode is an independent project and isn't affiliated with Anthropic
 or Even Realities.
 
-Status: milestones 1 and 2 of the port (see `docs/windows-design.md`). Sessions,
+Status: milestones 1 to 3 of the port (see `docs/windows-design.md`). Sessions,
 the live transcript, approvals, interrupt and model switching work through the hub
-API; the hub runs as a Task Scheduler task that starts at logon. Not ported yet:
-voice, keep-awake.
+API; the hub runs as a Task Scheduler task that starts at logon; hold to talk is
+transcribed locally with whisper.cpp. Not ported yet: keep-awake.
 
 ## How it works
 
@@ -47,7 +47,7 @@ sessions running.
 - Start a new session in a recent project, or resume a past session.
 - A menu to interrupt, compact, or switch the session's model without changing
   your default.
-- Hold to talk, once voice is ported.
+- Hold to talk. Words appear while you speak. Release to review, then tap to send.
 
 ## Requirements
 
@@ -59,8 +59,14 @@ On your PC (Windows 10 1809 or newer, Windows 11 recommended):
 - [Tailscale](https://tailscale.com/download/windows), signed in, with HTTPS
   certificates turned on for your tailnet at
   [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns)
-- Optional, for voice (not ported yet): whisper.cpp's Windows build, downloaded by
-  `glancecode setup-voice` when that lands.
+- Optional, for voice: nothing to install by hand. `glancecode setup-voice`
+  downloads whisper.cpp's Windows build and the speech model (about 550 MB) into
+  `%LOCALAPPDATA%\glancecode`. On a PC with an NVIDIA GPU it takes the CUDA build
+  (about 685 MB, runtime included; needs only the normal driver), which
+  transcribes a sentence in under a tenth of a second; the CPU build (9 MB,
+  `--cpu`) takes about as long as the speech itself. It's free, open source and
+  runs offline, so there's no API key or subscription. Without it, everything
+  except hold to talk still works.
 
 Git for Windows is not needed. The hook runs under PowerShell.
 
@@ -154,7 +160,8 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 | `hookPort` | 7718 | hook intake on 127.0.0.1 |
 | `hostPipe` | `\\.\pipe\glancecode-host-<user>` | the session host's named pipe |
 | `claudeArgs` | `[]` | extra arguments for sessions started from the glasses |
-| `whisperBin` | `%LOCALAPPDATA%\glancecode\whisper\whisper-server.exe` | whisper.cpp server, once voice is ported |
+| `whisperBin` | `%LOCALAPPDATA%\glancecode\whisper\whisper-server.exe` | whisper.cpp server, as installed by `setup-voice`; point it at your own build to use that instead |
+| `whisperThreads` | half the logical CPUs, 2 to 8 | CPU threads for transcription |
 | `sttVocabulary` | | words the speech model should expect |
 | `ntfyTopic` | empty | optional phone push through ntfy when a session finishes or needs you |
 | `bindTailscaleIP` | false | also listen on the raw Tailscale IP over plain HTTP, for development |
@@ -166,7 +173,12 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 - The G2 display has one font weight, so markdown is shown as plain text.
 - Sessions must be started with `glancecode claude` for the glasses to type into
   them.
-- Voice and keep-awake are not ported yet.
+- Keep-awake is not ported yet: a PC that sleeps looks like a dead hub from the
+  glasses until it wakes.
+- Voice on the CPU build is about real time, so the live preview while holding
+  lags behind speech. The CUDA build (`setup-voice --cuda`) doesn't. AMD and
+  Intel GPUs have no prebuilt whisper.cpp server; `whisperBin` can point at your
+  own build.
 
 ## Development
 

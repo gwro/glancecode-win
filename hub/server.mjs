@@ -38,7 +38,7 @@ export function startHub({ quiet = false, feed = true } = {}) {
     if (!quiet) console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
   };
   const registry = new Registry();
-  const transcriber = new Transcriber({ port: cfg.whisperPort, model: cfg.whisperModel, bin: cfg.whisperBin, log });
+  const transcriber = new Transcriber({ port: cfg.whisperPort, model: cfg.whisperModel, bin: cfg.whisperBin, threads: cfg.whisperThreads, log });
   const notifier = new Notifier({ server: cfg.ntfyServer, topic: cfg.ntfyTopic, log });
   const agents = ["claude"];
 

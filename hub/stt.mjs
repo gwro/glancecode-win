@@ -49,10 +49,11 @@ export function cleanTranscript(raw) {
 }
 
 export class Transcriber {
-  constructor({ port, model, bin = "whisper-server", log = () => {} }) {
+  constructor({ port, model, bin = "whisper-server", threads = 6, log = () => {} }) {
     this.port = port;
     this.model = model;
     this.bin = bin; // a command on PATH, or the full path to whisper-server.exe
+    this.threads = threads;
     this.log = log;
     this.proc = null;
     this.ready = null;
@@ -68,7 +69,7 @@ export class Transcriber {
     if (!this.available) throw new Error(`speech model or whisper-server not found (${this.model}, ${this.bin}); run: glancecode setup-voice`);
     this.ready = (async () => {
       if (await this.ping()) return; // already running (for example, a previous hub)
-      this.proc = spawn(this.bin, ["-m", this.model, "--host", "127.0.0.1", "--port", String(this.port), "-l", "en", "-nt", "-t", "6"], {
+      this.proc = spawn(this.bin, ["-m", this.model, "--host", "127.0.0.1", "--port", String(this.port), "-l", "en", "-nt", "-t", String(this.threads)], {
         stdio: ["ignore", "ignore", "pipe"],
         windowsHide: true,
       });
@@ -81,7 +82,10 @@ export class Transcriber {
       });
       const until = Date.now() + 60_000;
       while (Date.now() < until) {
-        if (await this.ping()) return;
+        if (await this.ping()) {
+          await this.warmUp();
+          return;
+        }
         await sleep(300);
       }
       throw new Error("whisper-server did not start within 60s");
@@ -90,6 +94,24 @@ export class Transcriber {
       throw err;
     });
     return this.ready;
+  }
+
+  /**
+   * The first inference after a start is slow: the model is paged in, and a CUDA
+   * build compiles its kernels for the GPU (half a minute on a new card). Spend
+   * that on a second of silence at startup rather than on someone's first words.
+   */
+  async warmUp() {
+    const started = Date.now();
+    try {
+      const form = new FormData();
+      form.append("file", new Blob([pcmToWav(Buffer.alloc(16000 * 2))], { type: "audio/wav" }), "warmup.wav");
+      form.append("response_format", "json");
+      await fetch(`http://127.0.0.1:${this.port}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(180_000) });
+      this.log(`whisper warm-up took ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    } catch (err) {
+      this.log(`whisper warm-up failed: ${err.message}`);
+    }
   }
 
   async ping() {
