@@ -1,13 +1,14 @@
 # Contributing
 
-This is a private, Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
+This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode),
+published at [gwro/glancecode-win](https://github.com/gwro/glancecode-win).
 See `docs/windows-design.md` for what changed and why.
 
 ## Setup
 
 ```powershell
-git clone <this repo>
-cd wglancecode
+git clone https://github.com/gwro/glancecode-win.git
+cd glancecode-win
 npm install
 npm run build:app
 npm test

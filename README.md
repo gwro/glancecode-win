@@ -115,8 +115,8 @@ On your phone:
 From a checkout of this repository, in PowerShell:
 
 ```powershell
-git clone <this repository>
-cd wglancecode
+git clone https://github.com/gwro/glancecode-win.git
+cd glancecode-win
 npm install
 npm run build:app
 node bin\glancecode setup
