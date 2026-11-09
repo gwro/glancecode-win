@@ -1,17 +1,16 @@
 // Session registry: fed by Claude Code hooks, enriched from transcripts,
-// checked against live processes and tmux panes.
+// checked against live processes and host panes.
 import { EventEmitter } from "node:events";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CLAUDE_PROJECTS_DIR, STATE_FILE } from "./config.mjs";
 import { entryMeta, entryToItems, parseLine, readTailLines, toolLabel, TranscriptTail } from "./transcript.mjs";
-import { geminiEntryMeta, geminiEntryToItems, geminiSessionFile, isGeminiSubagentTranscript, isGeminiTranscript, normalizeGeminiHook } from "./gemini.mjs";
-import { capture, paneAlive, paneKey, readDialog, socketFromTmuxEnv } from "./tmux.mjs";
+import { capture, paneAlive, paneKey, readDialog, targetFromHook } from "./pane.mjs";
 
 const MAX_ITEMS = 300;
 const HISTORY_ITEMS = 150; // how much history to load when the hub starts watching a session
 
-function pidAlive(pid) {
+export function pidAlive(pid) {
   if (!pid) return false;
   try {
     process.kill(pid, 0);
@@ -28,13 +27,12 @@ function pidAlive(pid) {
 export class Session {
   constructor({ id, cwd, transcriptPath }) {
     this.id = id;
-    /** @type {"claude"|"codex"|"gemini"} */
     this.agent = "claude";
     this.cwd = cwd;
     this.project = basename(cwd || "") || "claude";
     this.transcriptPath = transcriptPath;
-    /** @type {{socket: string, pane: string} | null} */
-    this.tmux = null;
+    /** @type {import("./pane.mjs").Target | null} the host pane, when Claude runs in one */
+    this.pane = null;
     this.pid = null;
     /** @type {State} */
     this.state = "starting";
@@ -47,7 +45,7 @@ export class Session {
     this.title = null;
     this.summary = null;
     this.origin = "terminal";
-    this.tmuxName = null;
+    this.paneName = null; // the host's session name, shown as the terminal tab name
     this.lastActivity = Date.now();
     this.backgroundTasks = 0;
     /** @type {import("./transcript.mjs").Item[]} */
@@ -57,8 +55,7 @@ export class Session {
   }
 
   get controllable() {
-    if (this.agent === "codex") return !!this.codexJoined && this.state !== "ended";
-    return !!this.tmux && this.state !== "ended";
+    return !!this.pane && this.state !== "ended";
   }
 
   summaryJSON() {
@@ -77,7 +74,7 @@ export class Session {
       summary: this.summary,
       origin: this.origin,
       controllable: this.controllable,
-      tmuxName: this.tmuxName,
+      tmuxName: this.paneName, // wire name kept for the glasses app
       lastActivity: this.lastActivity,
       backgroundTasks: this.backgroundTasks,
       itemCount: this.items.length,
@@ -87,13 +84,12 @@ export class Session {
   persistJSON() {
     return {
       id: this.id,
-      agent: this.agent,
       cwd: this.cwd,
       transcriptPath: this.transcriptPath,
-      tmux: this.tmux,
+      pane: this.pane,
       pid: this.pid,
       origin: this.origin,
-      tmuxName: this.tmuxName,
+      paneName: this.paneName,
       state: this.state,
       lastActivity: this.lastActivity,
     };
@@ -120,9 +116,11 @@ export class Registry extends EventEmitter {
     }
     for (const s of saved.sessions || []) {
       if (!s.id || !s.transcriptPath) continue;
-      if (!pidAlive(s.pid)) continue; // only restore sessions whose process still runs
+      // Restore sessions whose process still runs; a pane without a known pid is
+      // restored too and the first sweep asks the host whether it is still there.
+      if (s.pid ? !pidAlive(s.pid) : !s.pane) continue;
       const session = new Session(s);
-      Object.assign(session, { agent: s.agent === "gemini" ? "gemini" : "claude", tmux: s.tmux, pid: s.pid, origin: s.origin || "terminal", tmuxName: s.tmuxName || null });
+      Object.assign(session, { pane: s.pane || null, pid: s.pid || null, origin: s.origin || "terminal", paneName: s.paneName || null });
       session.state = "idle"; // waiting details are not persisted; the next hook or sweep corrects it
       session.lastActivity = s.lastActivity || Date.now();
       this.attach(session);
@@ -132,8 +130,7 @@ export class Registry extends EventEmitter {
   scheduleSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
-      // Codex sessions are rediscovered from its app-server; the rest are remembered.
-      const sessions = [...this.sessions.values()].filter((s) => s.state !== "ended" && s.agent !== "codex").map((s) => s.persistJSON());
+      const sessions = [...this.sessions.values()].filter((s) => s.state !== "ended").map((s) => s.persistJSON());
       try {
         writeFileSync(STATE_FILE, JSON.stringify({ sessions }, null, 2));
       } catch {
@@ -147,7 +144,7 @@ export class Registry extends EventEmitter {
 
   attach(session) {
     this.sessions.set(session.id, session);
-    if (session.agent !== "codex") this.loadHistory(session);
+    this.loadHistory(session);
     this.scheduleSave();
     this.changed(session);
   }
@@ -173,10 +170,9 @@ export class Registry extends EventEmitter {
   }
 
   loadHistory(session) {
-    const resolvePath = session.agent === "gemini" ? () => geminiSessionFile(session.transcriptPath, session.id) : null;
-    const path = resolvePath ? resolvePath() : session.transcriptPath;
+    const path = session.transcriptPath;
     if (!path || !existsSync(path)) {
-      session.tail = new TranscriptTail(path, { fromOffset: 0, resolvePath }).start();
+      session.tail = new TranscriptTail(path, { fromOffset: 0 }).start();
     } else {
       // Screenshots and big tool outputs can make a few megabytes cover only minutes,
       // so widen the window until there is enough to show or the whole file is read.
@@ -189,18 +185,17 @@ export class Registry extends EventEmitter {
         for (const line of tail.lines) this.applyEntry(session, parseLine(line), false);
         if (session.items.length >= HISTORY_ITEMS || maxBytes >= tail.end) break;
       }
-      session.tail = new TranscriptTail(path, { fromOffset: end, resolvePath }).start();
+      session.tail = new TranscriptTail(path, { fromOffset: end }).start();
     }
     session.tail.on("entry", (entry) => this.applyEntry(session, entry, true));
   }
 
   applyEntry(session, entry, live) {
     if (!entry) return;
-    const gemini = session.agent === "gemini";
-    // A resumed Claude session appends to a file whose entries carry the same session
-    // id, but forks write other ids; ignore entries that belong to another session.
-    if (!gemini && entry.sessionId && entry.sessionId !== session.id) return;
-    const meta = gemini ? geminiEntryMeta(entry) : entryMeta(entry);
+    // A resumed session appends to a file whose entries carry the same session id,
+    // but forks write other ids; ignore entries that belong to another session.
+    if (entry.sessionId && entry.sessionId !== session.id) return;
+    const meta = entryMeta(entry);
     if (meta) {
       if (meta.title) session.title = meta.title;
       if (meta.model) session.model = meta.model;
@@ -208,7 +203,7 @@ export class Registry extends EventEmitter {
       if (meta.summary) session.summary = meta.summary;
       if (meta.permissionMode) session.permissionMode = meta.permissionMode;
     }
-    const fresh = this.addItems(session, gemini ? geminiEntryToItems(entry) : entryToItems(entry), false);
+    const fresh = this.addItems(session, entryToItems(entry), false);
     if (live && fresh.length) {
       session.lastActivity = Date.now();
       // Interrupts and declined permissions end the turn without a Stop hook.
@@ -235,39 +230,30 @@ export class Registry extends EventEmitter {
 
   /**
    * @param {object} payload hook stdin JSON
-   * @param {{tmux?: string, pane?: string, ppid?: string}} env
+   * @param {{host?: string, pane?: string, pid?: number}} env what the hook script knew
+   *   about its surroundings: the host pane it ran in, and Claude's process id if known
+   * @returns {Session | null} the session the event applied to
    */
   handleHook(payload, env = {}) {
-    // Gemini CLI's hooks look like Claude Code's; its session files give it away.
-    const agent = isGeminiTranscript(payload?.transcript_path) ? "gemini" : "claude";
-    if (agent === "gemini") {
-      if (isGeminiSubagentTranscript(payload.transcript_path)) return; // sub-agents follow their parent
-      payload = normalizeGeminiHook(payload);
-      if (!payload) return;
-    }
     const id = payload?.session_id;
     const event = payload?.hook_event_name;
-    if (!id || !event) return;
-    if (payload.agent_id) return; // subagent-level hooks: the parent session's state is what matters
+    if (!id || !event) return null;
+    if (payload.agent_id) return null; // subagent-level hooks: the parent session's state is what matters
 
     let session = this.sessions.get(id);
+    const target = targetFromHook(env);
     if (!session) {
-      if (event === "SessionEnd") return;
+      if (event === "SessionEnd") return null;
       session = new Session({ id, cwd: payload.cwd, transcriptPath: payload.transcript_path });
-      session.agent = agent;
-      const pending = this.pendingLaunch({ socket: socketFromTmuxEnv(env.tmux), pane: env.pane });
+      const pending = this.pendingLaunch(target);
       if (pending) {
         session.origin = pending.origin;
-        session.tmuxName = pending.name;
+        session.paneName = pending.name;
       }
       this.attach(session);
     }
-    if (env.pane && env.tmux) {
-      const socket = socketFromTmuxEnv(env.tmux);
-      if (socket) session.tmux = { socket, pane: env.pane };
-    }
-    const ppid = Number(env.ppid);
-    if (ppid > 1) session.pid = ppid;
+    if (target) session.pane = target;
+    if (env.pid > 1) session.pid = env.pid;
     if (payload.cwd && payload.cwd !== session.cwd) {
       session.cwd = payload.cwd;
       session.project = basename(payload.cwd);
@@ -340,6 +326,7 @@ export class Registry extends EventEmitter {
     session.transcriptPath = payload.transcript_path || session.transcriptPath;
     this.scheduleSave();
     this.changed(session);
+    return session;
   }
 
   // ---------- launches from the glasses ----------
@@ -364,21 +351,16 @@ export class Registry extends EventEmitter {
 
   async sweep() {
     for (const s of this.sessions.values()) {
-      if (s.state === "ended" || s.agent === "codex") continue; // Codex reports its own lifecycle
-      let alive = s.pid ? pidAlive(s.pid) : true;
-      if (alive && s.tmux) {
-        // A session whose pane is gone has lost its terminal. Claude Code exits then,
-        // but Gemini CLI can linger as an orphan, so don't trust the process alone.
-        if (!(await paneAlive(s.tmux))) {
-          s.tmux = null;
-          alive = false;
-        }
-      }
+      if (s.state === "ended") continue;
+      // A pane that's gone means the terminal is gone, and Claude Code with it.
+      // Without a pane, the process id is all there is.
+      let alive = s.pane ? await paneAlive(s.pane) : s.pid ? pidAlive(s.pid) : true;
+      if (s.pane && !alive) s.pane = null;
       // A waiting state with no dialog on screen is stale (answered at the desk,
       // declined, or interrupted without a hook). Clear it after two checks.
-      if (alive && s.tmux && s.waiting) {
+      if (alive && s.pane && s.waiting) {
         try {
-          const kind = readDialog(await capture(s.tmux, 40), s.agent).kind;
+          const kind = readDialog(await capture(s.pane, 40)).kind;
           const onScreen = kind === "permission" || kind === "question" || kind === "unknown";
           s.staleWaitingChecks = onScreen ? 0 : (s.staleWaitingChecks || 0) + 1;
           if (s.staleWaitingChecks >= 2) {

@@ -7,17 +7,19 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       matrix:
-        node: [20, 22]
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Hub tests
-        run: node --test test/*.test.mjs
+      - name: Install hub dependencies
+        run: npm ci
+      - name: Hub and host tests
+        run: node --test --test-timeout=60000 test/*.test.mjs
       - name: Install app dependencies
         run: npm ci --prefix app
       - name: Type-check and build the glasses app
@@ -32,3 +34,4 @@ jobs:
         run: |
           node bin/glancecode help
           node bin/glancecode version
+          node bin/glancecode ls

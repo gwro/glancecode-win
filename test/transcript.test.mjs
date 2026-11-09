@@ -4,7 +4,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { entryMeta, entryToItems, toolLabel, TranscriptTail } from "../hub/transcript.mjs";
-import { readDialog } from "../hub/tmux.mjs";
+import { readDialog } from "../hub/pane.mjs";
 
 test("user prompt becomes a user item; injected context is dropped", () => {
   assert.deepEqual(entryToItems({ type: "user", uuid: "u1", message: { content: "fix the build" } }).map((i) => i.kind), ["user"]);
@@ -149,7 +149,7 @@ test("non-empty thinking blocks are the progress messages the terminal shows", (
 });
 
 test("delivery check matches a prompt across wrapped terminal lines", async () => {
-  const { promptSnippet, screenHasSnippet } = await import("../hub/tmux.mjs");
+  const { promptSnippet, screenHasSnippet } = await import("../hub/pane.mjs");
   const text = "I am not sure if it is worth mentioning, but if I have garlic added twice";
   const snip = promptSnippet(text);
   assert.ok(screenHasSnippet("❯ I am not sure if it is worth\n  mentioning, but if I have garlic", snip));

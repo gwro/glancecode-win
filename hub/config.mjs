@@ -1,23 +1,26 @@
 // Hub configuration and on-disk locations.
 import { randomBytes } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { BRAND, env } from "./brand.mjs";
+import { defaultPipe } from "../host/client.mjs";
 
-const XDG_CONFIG = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-const XDG_DATA = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+const WIN = process.platform === "win32";
+// Windows: config in Roaming AppData, big files (speech model, binaries, logs) in Local.
+// Elsewhere (tests, CI): the XDG folders upstream uses.
+const CONFIG_BASE = WIN ? process.env.APPDATA || join(homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+const DATA_BASE = WIN ? process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local") : process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
 
-export const CONFIG_DIR = env("CONFIG_DIR") || join(XDG_CONFIG, BRAND.name);
-export const DATA_DIR = env("DATA_DIR") || join(XDG_DATA, BRAND.name);
+export const CONFIG_DIR = env("CONFIG_DIR") || join(CONFIG_BASE, BRAND.name);
+export const DATA_DIR = env("DATA_DIR") || join(DATA_BASE, BRAND.name);
+export const LOG_DIR = join(DATA_DIR, "logs");
 export const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 export const STATE_FILE = join(CONFIG_DIR, "sessions.json");
-export const TMUX_CONF = join(CONFIG_DIR, "tmux.conf");
-export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
-// Codex's app-server listens on this socket; the file is created owner-only.
-export const CODEX_SOCKET = env("CODEX_SOCKET") || join(CONFIG_DIR, "codex.sock");
-
-migrateLegacyDirs();
+// Claude Code's own folder; CLAUDE_CONFIG_DIR moves it.
+export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+export const CLAUDE_SETTINGS = join(CLAUDE_DIR, "settings.json");
+export const CLAUDE_PROJECTS_DIR = join(CLAUDE_DIR, "projects");
 
 const DEFAULTS = {
   port: 7717, // API + glasses app, 127.0.0.1 (reached from the phone through `tailscale serve`)
@@ -27,28 +30,19 @@ const DEFAULTS = {
   // Also listen on the raw Tailscale IP over plain HTTP. Only for development
   // sideloads; store builds must use HTTPS through tailscale serve.
   bindTailscaleIP: false,
-  tmuxSocket: BRAND.tmuxSocket,
+  // The session host's named pipe. One host per Windows user by default.
+  hostPipe: defaultPipe(),
+  whisperBin: WIN ? join(DATA_DIR, "whisper", "whisper-server.exe") : "whisper-server",
   whisperModel: join(DATA_DIR, "models", "ggml-large-v3-turbo-q5_0.bin"),
   // Words whisper should expect: project names get appended at runtime.
-  sttVocabulary: "Claude, Claude Code, Opus, Sonnet, Haiku, tmux, commit, deploy, npm, git",
+  sttVocabulary: "Claude, Claude Code, Opus, Sonnet, Haiku, commit, deploy, npm, git",
   // Optional phone push through ntfy (https://ntfy.sh). Off unless a topic is set.
   ntfyTopic: "",
   ntfyServer: "https://ntfy.sh",
   // Extra arguments for sessions the glasses start (for example ["--model", "sonnet"]).
   claudeArgs: [],
-  // macOS: hold the machine awake while the hub runs, so the glasses can reach it.
-  // Only while plugged in; on battery the Mac still sleeps normally.
+  // Keep the machine awake while the hub runs, so the glasses can reach it. Later milestone.
   preventSleep: true,
-  // Codex CLI sessions: "auto" follows them when the codex command is installed.
-  codex: "auto",
-  codexBin: "codex",
-  // Gemini CLI sessions: "auto" follows them when the gemini command is installed.
-  gemini: "auto",
-  geminiBin: "gemini",
-  // Extra arguments for Gemini sessions the glasses start.
-  geminiArgs: [],
-  // What "New session" starts from a glasses app that doesn't ask ("claude", "codex" or "gemini").
-  defaultAgent: "claude",
 };
 
 /** Read the raw config file without generating tokens (used at import time). */
@@ -61,7 +55,7 @@ function readConfigFile() {
   }
 }
 
-export const TMUX_SOCKET_NAME = env("TMUX_SOCKET") || readConfigFile().tmuxSocket || DEFAULTS.tmuxSocket;
+export const HOST_PIPE = env("HOST_PIPE") || readConfigFile().hostPipe || DEFAULTS.hostPipe;
 
 export function loadConfig() {
   mkdirSync(CONFIG_DIR, { recursive: true });
@@ -86,7 +80,8 @@ export function loadConfig() {
 export function saveConfig(cfg) {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + "\n");
-  chmodSync(CONFIG_FILE, 0o600);
+  // The profile folders are already private to the user on Windows; elsewhere, make the file so.
+  if (!WIN) chmodSync(CONFIG_FILE, 0o600);
 }
 
 /** Update individual keys in the config file, keeping everything else. */
@@ -95,34 +90,6 @@ export function updateConfig(patch) {
   Object.assign(cfg, patch);
   saveConfig(cfg);
   return cfg;
-}
-
-/**
- * First run under a new name: copy config and data from a folder an earlier
- * version used, and keep that version's tmux server so running sessions stay
- * reachable.
- */
-function migrateLegacyDirs() {
-  if (env("CONFIG_DIR") || existsSync(CONFIG_DIR)) return;
-  for (const old of BRAND.legacy.configDirs) {
-    const oldConfig = join(XDG_CONFIG, old);
-    if (!existsSync(join(oldConfig, "config.json"))) continue;
-    cpSync(oldConfig, CONFIG_DIR, { recursive: true });
-    const oldData = join(XDG_DATA, old);
-    // Move rather than copy: the data folder holds a ~550 MB speech model.
-    if (!env("DATA_DIR") && existsSync(oldData) && !existsSync(DATA_DIR)) renameSync(oldData, DATA_DIR);
-    try {
-      const cfg = JSON.parse(readFileSync(join(CONFIG_DIR, "config.json"), "utf8"));
-      cfg.tmuxSocket ||= old;
-      // Earlier versions always listened on the Tailscale IP; installed apps may rely on it.
-      cfg.bindTailscaleIP ??= true;
-      if (cfg.whisperModel?.includes(`/${old}/`)) cfg.whisperModel = cfg.whisperModel.replace(`/${old}/`, `/${BRAND.name}/`);
-      writeFileSync(join(CONFIG_DIR, "config.json"), JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
-    } catch {
-      /* leave the copied config as is */
-    }
-    return;
-  }
 }
 
 /** The machine's Tailscale IPv4 address, if Tailscale is up. */

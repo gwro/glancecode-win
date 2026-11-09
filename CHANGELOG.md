@@ -1,5 +1,33 @@
 # Changelog
 
+This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
+Entries below the fork line are upstream's.
+
+## Unreleased (Windows fork, milestone 1)
+
+- Windows native: no WSL, no tmux. A small **session host** runs Claude Code in a
+  ConPTY pseudo-console, keeps a headless terminal screen for it, and the hub and
+  the CLI reach it over a user-private named pipe. Hub restarts leave sessions
+  running, and the host exits by itself when its last session ends.
+- `glancecode claude [args]` starts Claude Code in the host and attaches this
+  console to it; closing the window or Ctrl+] detaches. `glancecode attach` and
+  `glancecode ls` work the same way as upstream's tmux versions.
+- The hub follows sessions through a Node hook script that Claude Code runs under
+  PowerShell (`bin/glancecode-hook.mjs`), on both host sessions and sessions
+  started in a plain terminal (view-only).
+- Live transcript, approvals with the real option labels, interrupt, model switch
+  and compact through the same hub API as upstream, so the Even Hub glasses app
+  is unchanged.
+- Config in `%APPDATA%\glancecode`, data and logs in `%LOCALAPPDATA%\glancecode`.
+- Removed: Codex and Gemini CLI support, tmux, launchd/systemd. Not yet ported:
+  `service` (Task Scheduler), `setup-voice` (whisper.cpp download), keep-awake.
+- Found along the way: Claude Code's menus ignore arrow keys that arrive through a
+  ConPTY input pipe but take vi keys, a lone Escape is delayed by conhost unless
+  sent as a win32-input-mode key record, and a session launched from inside
+  another Claude Code session inherits markers that turn off its transcript.
+
+---
+
 ## 0.6.2
 
 - Codex: resuming a session the hub can't open now says why, and what to do, rather

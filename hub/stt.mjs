@@ -49,26 +49,30 @@ export function cleanTranscript(raw) {
 }
 
 export class Transcriber {
-  constructor({ port, model, log = () => {} }) {
+  constructor({ port, model, bin = "whisper-server", log = () => {} }) {
     this.port = port;
     this.model = model;
+    this.bin = bin; // a command on PATH, or the full path to whisper-server.exe
     this.log = log;
     this.proc = null;
     this.ready = null;
   }
 
   get available() {
-    return existsSync(this.model);
+    const binPresent = /[\\/]/.test(this.bin) ? existsSync(this.bin) : true;
+    return binPresent && existsSync(this.model);
   }
 
   async ensure() {
     if (this.ready) return this.ready;
-    if (!this.available) throw new Error(`speech model not found at ${this.model}; run: glancecode setup-voice`);
+    if (!this.available) throw new Error(`speech model or whisper-server not found (${this.model}, ${this.bin}); run: glancecode setup-voice`);
     this.ready = (async () => {
       if (await this.ping()) return; // already running (for example, a previous hub)
-      this.proc = spawn("whisper-server", ["-m", this.model, "--host", "127.0.0.1", "--port", String(this.port), "-l", "en", "-nt", "-t", "6"], {
+      this.proc = spawn(this.bin, ["-m", this.model, "--host", "127.0.0.1", "--port", String(this.port), "-l", "en", "-nt", "-t", "6"], {
         stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
       });
+      this.proc.on("error", (err) => this.log(`whisper-server could not start: ${err.message}`));
       this.proc.stderr.on("data", () => {});
       this.proc.on("exit", (code) => {
         this.log(`whisper-server exited (${code})`);

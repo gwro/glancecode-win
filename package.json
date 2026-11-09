@@ -1,14 +1,15 @@
 {
-  "name": "@sousy/glancecode",
+  "name": "@gwro/glancecode-win",
   "version": "0.6.2",
-  "description": "Drive your Claude Code sessions from Even Realities G2 smart glasses: live transcript, approvals, and hold-to-talk voice, running on your own machine.",
+  "description": "Drive your Claude Code sessions from Even Realities G2 smart glasses, natively on Windows: live transcript, approvals, and hold-to-talk voice.",
   "type": "module",
   "bin": {
     "glancecode": "bin/glancecode"
   },
   "files": [
     "bin/glancecode",
-    "bin/glancecode-hook",
+    "bin/glancecode-hook.mjs",
+    "host/",
     "hub/",
     "app/dist/",
     "docs/",
@@ -21,8 +22,7 @@
     "node": ">=20"
   },
   "os": [
-    "darwin",
-    "linux"
+    "win32"
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs && npm test --prefix app",
@@ -37,17 +37,15 @@
     "even-realities",
     "g2",
     "smart-glasses",
-    "tmux",
+    "windows",
+    "conpty",
     "even-hub"
   ],
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/sousyllc/glancecode.git"
+  "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.18",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0"
   },
-  "homepage": "https://github.com/sousyllc/glancecode#readme",
-  "bugs": "https://github.com/sousyllc/glancecode/issues",
-  "publishConfig": {
-    "access": "public"
-  }
+  "private": true
 }

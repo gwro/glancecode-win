@@ -524,7 +524,7 @@ class SessionScreen implements Screen {
 
   private viewOnlyHint() {
     const agent = agentOf(this.session);
-    return agent === "codex" ? "View only: Codex isn't connected to the hub right now" : `View only: not in tmux. Start it with glancecode ${agent}`;
+    return agent === "codex" ? "View only: Codex isn't connected to the hub right now" : `View only: started outside glancecode. Start it with glancecode ${agent}`;
   }
 
   /** Working or waiting: worth keeping the WebView awake for. */
