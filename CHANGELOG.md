@@ -3,6 +3,21 @@
 This is the Windows-native fork of [GlanceCode](https://github.com/sousyllc/glancecode).
 Entries below the fork line are upstream's.
 
+## Unreleased (Windows fork, milestone 4)
+
+- Keep-awake: while the hub runs and the PC is on AC power, a small helper holds
+  the system (not the display) awake, so the glasses never see a sleeping hub.
+  `preventSleep: false` turns it off.
+- `pair` draws the pairing code as a QR code in the terminal.
+- Fixed: a permission dialog read while Claude Code's UI was mid-redraw could miss
+  the first option and shift the rest, so a tap on "Yes" chose "Yes, and switch to
+  accept edits". Dialog reads now reject such gaps and wait for two matching reads.
+- A hub restarted (or started) while Claude Code was already waiting on a dialog
+  finds it on screen and shows it as waiting, rather than idle.
+- Checked in Even's simulator against this hub: session list, transcript, reply,
+  approval with the real options, New session in a recent project, and Resume of a
+  past session with its history.
+
 ## Unreleased (Windows fork, milestone 3)
 
 - Voice. `glancecode setup-voice` downloads whisper.cpp's Windows build (the

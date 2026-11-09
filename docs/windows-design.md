@@ -456,3 +456,24 @@ Things the implementation learned that the design above didn't predict:
   `setup-voice` picks CUDA when `nvidia-smi.exe` is in System32; `--cpu` and
   `--cuda` override, and switching builds stops the running server first (its
   files are locked while it runs).
+
+## What milestone 4 found
+
+- **Keep-awake** is a PowerShell helper calling `SetThreadExecutionState`
+  (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) every 30 s while on AC power, exiting
+  when the hub's pid is gone. It holds the system, not the display.
+- **Dialog reads race Claude Code's redraws.** A capture taken mid-redraw can miss
+  one line of a numbered list; the old parser compacted the list, so index 0 became
+  option 2 and a tap on "Yes" pressed "Yes, and switch to accept edits". Reads now
+  reject lists with gaps and wait for two consecutive matching reads. This affects
+  upstream too, since `capture-pane` has the same race; worth sending back.
+- **Dialogs the hub never heard about.** Restart the hub while Claude waits for
+  approval and the restored session comes back idle, because waiting isn't
+  persisted. The sweep now reads each live pane and, after two matching reads,
+  reports a permission or question dialog it finds, with the question line as the
+  detail. The same path covers a lost hook.
+- New session and Resume from the glasses both work through the simulator: the
+  project picker lists recent projects from the transcripts on disk, Resume lists
+  past sessions with their titles, and the resumed session shows its history.
+- `pair` draws the QR code with `qrcode-terminal` (pure JS, no dependencies),
+  since `qrencode` isn't a Windows staple.

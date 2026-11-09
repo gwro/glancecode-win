@@ -75,12 +75,35 @@ export function readDialog(screen) {
     const m = /^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$/.exec(l);
     if (m) options[Number(m[1]) - 1] = m[2];
   }
-  const clean = options.filter(Boolean);
+  // The UI redraws constantly, and a read taken mid-redraw can miss a line. A
+  // numbered list with a hole is such a read: compacting it would shift every
+  // index after the hole, so the dialog isn't ready rather than wrong.
+  const complete = options.length > 0 && Array.from(options).every(Boolean); // from(): holes become undefined, every() alone skips them
+  const clean = complete ? options : [];
   if (/Yes, I trust this folder/.test(joined)) return { kind: "trust", options: clean };
-  if (/Do you want to (proceed|make this edit|create|allow)/i.test(joined) && clean.length) return { kind: "permission", options: clean };
+  const asked = /^\s*(Do you want to [^?]*\?)/im.exec(joined)?.[1];
+  if (asked && /Do you want to (proceed|make this edit|create|allow)/i.test(asked) && clean.length) return { kind: "permission", options: clean, prompt: asked };
   if (/Enter to select/.test(joined) && clean.length) return { kind: "question", options: clean };
+  if (!complete && options.length) return { kind: "unknown", options: [] };
   if (/^\s*❯\s*/m.test(tail.slice(-4).join("\n"))) return { kind: "input", options: [] };
   return { kind: "unknown", options: clean };
+}
+
+/**
+ * Read the dialog until two consecutive reads agree and neither is a mid-redraw
+ * miss, so a glasses tap lands on the option the glasses showed.
+ */
+export async function readDialogStable(target, { lines = 40, attempts = 6, gapMs = 70 } = {}) {
+  let previous = null;
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    last = readDialog(await capture(target, lines));
+    const key = JSON.stringify(last);
+    if (last.kind !== "unknown" && key === previous) return last;
+    previous = key;
+    await sleep(gapMs);
+  }
+  return last;
 }
 
 /** Type a prompt into Claude Code's input box and submit it. */
@@ -104,7 +127,7 @@ export async function sendKey(target, key) {
  * never lands in the prompt box by accident.
  */
 export async function chooseOption(target, expectedKind, index) {
-  const dialog = readDialog(await capture(target));
+  const dialog = await readDialogStable(target);
   if (dialog.kind !== expectedKind) {
     throw Object.assign(new Error(`no ${expectedKind} dialog on screen (saw ${dialog.kind})`), { status: 409 });
   }
@@ -157,7 +180,7 @@ export async function switchModel(target, model, settingsPath) {
 
 /** Answer a question with free text via its "Type something" option. */
 export async function answerWithText(target, text) {
-  const dialog = readDialog(await capture(target));
+  const dialog = await readDialogStable(target);
   if (dialog.kind !== "question") throw Object.assign(new Error("no question on screen"), { status: 409 });
   const idx = dialog.options.findIndex((o) => /^Type something/i.test(o));
   if (idx < 0) throw Object.assign(new Error("question has no free-text option"), { status: 400 });

@@ -356,18 +356,36 @@ export class Registry extends EventEmitter {
       // Without a pane, the process id is all there is.
       let alive = s.pane ? await paneAlive(s.pane) : s.pid ? pidAlive(s.pid) : true;
       if (s.pane && !alive) s.pane = null;
-      // A waiting state with no dialog on screen is stale (answered at the desk,
-      // declined, or interrupted without a hook). Clear it after two checks.
-      if (alive && s.pane && s.waiting) {
+      if (alive && s.pane) {
         try {
-          const kind = readDialog(await capture(s.pane, 40)).kind;
-          const onScreen = kind === "permission" || kind === "question" || kind === "unknown";
-          s.staleWaitingChecks = onScreen ? 0 : (s.staleWaitingChecks || 0) + 1;
-          if (s.staleWaitingChecks >= 2) {
-            s.waiting = null;
-            s.staleWaitingChecks = 0;
-            if (s.state === "waiting") s.state = kind === "input" ? "idle" : "working";
-            this.changed(s);
+          const dialog = readDialog(await capture(s.pane, 40));
+          if (s.waiting) {
+            // A waiting state with no dialog on screen is stale (answered at the desk,
+            // declined, or interrupted without a hook). Clear it after two checks.
+            const onScreen = dialog.kind === "permission" || dialog.kind === "question" || dialog.kind === "unknown";
+            s.staleWaitingChecks = onScreen ? 0 : (s.staleWaitingChecks || 0) + 1;
+            if (s.staleWaitingChecks >= 2) {
+              s.waiting = null;
+              s.staleWaitingChecks = 0;
+              if (s.state === "waiting") s.state = dialog.kind === "input" ? "idle" : "working";
+              this.changed(s);
+            }
+          } else if (dialog.kind === "permission" || dialog.kind === "question") {
+            // A dialog the hub never heard about: it was restarted while Claude waited,
+            // or the hook was lost. Two checks, so a mid-redraw read doesn't count.
+            s.unseenDialogChecks = (s.unseenDialogChecks || 0) + 1;
+            if (s.unseenDialogChecks >= 2) {
+              s.unseenDialogChecks = 0;
+              s.waiting =
+                dialog.kind === "permission"
+                  ? { kind: "permission", tool: s.lastTool?.tool, detail: s.lastTool?.detail || s.activity || dialog.prompt || "" }
+                  : { kind: "question", questions: [], questionIndex: 0, detail: "" };
+              s.state = "waiting";
+              this.changed(s);
+              this.emit("attention", s, dialog.kind);
+            }
+          } else {
+            s.unseenDialogChecks = 0;
           }
         } catch {
           /* pane busy or gone */

@@ -97,7 +97,7 @@ test("readDialog recognizes Claude Code's permission, question and trust screens
    2. Yes, and always allow access to /tmp/proj from this project
    3. No
  Esc to cancel · Tab to amend`;
-  assert.deepEqual(readDialog(permission), { kind: "permission", options: ["Yes", "Yes, and always allow access to /tmp/proj from this project", "No"] });
+  assert.deepEqual(readDialog(permission), { kind: "permission", options: ["Yes", "Yes, and always allow access to /tmp/proj from this project", "No"], prompt: "Do you want to proceed?" });
 
   const question = ` ☐ Fruit choice
 Which fruit do you prefer?
@@ -117,6 +117,10 @@ Enter to select · ↑/↓ to navigate · Esc to cancel`;
    Yes, I trust this folder
  Enter to confirm · Esc to cancel`;
   assert.equal(readDialog(trust).kind, "trust");
+  // A read taken mid-redraw that misses option 1 must not shift the others down.
+  const holed = permission.replace(/^.*1\. Yes\s*$/m, "");
+  assert.equal(readDialog(holed).kind, "unknown");
+  assert.deepEqual(readDialog(holed).options, []);
 
   const idle = `⏺ pong
 ────────────────

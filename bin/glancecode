@@ -49,7 +49,7 @@ const commands = {
     console.log("\nHTTPS for the glasses app");
     const served = commands.serve("on", { quiet: true });
     console.log("\nPairing");
-    if (served) commands.pair();
+    if (served) await commands.pair();
     else info(`After enabling HTTPS, run: ${CLI} serve && ${CLI} pair`);
     console.log(`\nTo let the glasses drive sessions you start at your desk, start Claude with \`${CLI} claude\`.`);
   },
@@ -312,7 +312,7 @@ const commands = {
   },
 
   // ---------- pairing ----------
-  pair() {
+  async pair() {
     const cfg = loadConfig();
     const url = hubUrl(cfg);
     if (!url) {
@@ -322,6 +322,14 @@ const commands = {
     const code = `${url}#${cfg.token}`;
     console.log(`Pairing code (paste it on the phone screen of the ${BRAND.displayName} app):\n`);
     console.log(`  ${code}\n`);
+    try {
+      const { createRequire } = await import("node:module");
+      const qr = createRequire(import.meta.url)("qrcode-terminal");
+      console.log("Or scan this with the phone camera and copy the text:\n");
+      await new Promise((resolve) => qr.generate(code, { small: true }, (s) => resolve(console.log(s.replace(/^/gm, "  ")))));
+    } catch {
+      /* no QR encoder; the code above is enough */
+    }
     info("Anyone with this code and access to your tailnet can type into your sessions. Keep it private.");
     if (rest.includes("--dev")) {
       const appUrl = `${url}/?hub=${encodeURIComponent(url)}&token=${encodeURIComponent(cfg.token)}`;

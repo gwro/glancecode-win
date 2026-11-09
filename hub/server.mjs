@@ -10,6 +10,7 @@ import { Transcriber } from "./stt.mjs";
 import { Notifier } from "./notify.mjs";
 import * as paneCtl from "./pane.mjs";
 import { parentPid } from "./procs.mjs";
+import { startKeepAwake } from "./awake.mjs";
 import { color, printFeed } from "./feed.mjs";
 import { BRAND } from "./brand.mjs";
 
@@ -71,6 +72,10 @@ export function startHub({ quiet = false, feed = true } = {}) {
   registry.load();
   const sweepTimer = setInterval(() => registry.sweep().catch(() => {}), 5000);
 
+  // A sleeping PC answers nothing, so the glasses see a dead hub. The helper holds
+  // the system (not the display) awake while on AC power; on battery it sleeps as usual.
+  const awake = cfg.preventSleep ? startKeepAwake({ hubPid: process.pid, log }) : null;
+
   let lastPresenceAt = 0;
 
   // ---------- helpers ----------
@@ -126,7 +131,7 @@ export function startHub({ quiet = false, feed = true } = {}) {
    * with the final Enter (for example, approve a permission). Refuse instead.
    */
   async function refuseIfDialog(s) {
-    const dialog = paneCtl.readDialog(await paneCtl.capture(controllable(s), 40));
+    const dialog = await paneCtl.readDialogStable(controllable(s));
     if (dialog.kind === "permission") throw new HttpError(409, "Claude is waiting for approval. Choose an option first.");
     if (dialog.kind === "question") throw new HttpError(409, "Claude asked a question. Pick an option or answer it by voice.");
     if (dialog.kind === "trust") throw new HttpError(409, "Claude is asking whether to trust this folder.");
@@ -302,8 +307,7 @@ export function startHub({ quiet = false, feed = true } = {}) {
         return send(res, 200, { ok: true });
       }
       if (method === "POST" && action === "screen") {
-        const screen = await paneCtl.capture(controllable(s), 40);
-        return send(res, 200, { dialog: paneCtl.readDialog(screen) });
+        return send(res, 200, { dialog: await paneCtl.readDialogStable(controllable(s)) });
       }
       if (method === "POST" && action === "command") {
         const { command } = await readJSON(req);
@@ -409,12 +413,14 @@ export function startHub({ quiet = false, feed = true } = {}) {
   if (!transcriber.available) log(`voice: speech model missing, run \`${BRAND.name} setup-voice\``);
   else transcriber.ensure().then(() => log("voice: whisper ready")).catch((err) => log(`voice: ${err.message}`));
   if (notifier.enabled) log(`phone push: ntfy topic set`);
+  if (awake) log("holding the PC awake while on AC power");
 
   return {
     cfg,
     registry,
     close() {
       clearInterval(sweepTimer);
+      awake?.kill();
       for (const res of clients) res.end();
       hookServer.close();
       for (const s of apiServers) s.close();

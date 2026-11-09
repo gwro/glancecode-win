@@ -9,10 +9,12 @@ no WSL, no tmux. It follows Claude Code only. The glasses app is upstream's,
 unchanged. GlanceCode is an independent project and isn't affiliated with Anthropic
 or Even Realities.
 
-Status: milestones 1 to 3 of the port (see `docs/windows-design.md`). Sessions,
-the live transcript, approvals, interrupt and model switching work through the hub
-API; the hub runs as a Task Scheduler task that starts at logon; hold to talk is
-transcribed locally with whisper.cpp. Not ported yet: keep-awake.
+Status: the port is complete (milestones 1 to 4, see `docs/windows-design.md`).
+Sessions, the live transcript, approvals, interrupt and model switching work
+through the hub API; the hub runs as a Task Scheduler task that starts at logon and
+keeps the PC awake; hold to talk is transcribed locally with whisper.cpp. Every
+glasses screen has been exercised in Even's simulator against this hub; the real
+glasses are the remaining test.
 
 ## How it works
 
@@ -130,7 +132,7 @@ At your desk:
 | `glancecode feed` | a readable live feed of every session |
 | `glancecode status` | hub and sessions |
 | `glancecode doctor` | check every piece and say what to fix |
-| `glancecode pair` | print the pairing code again |
+| `glancecode pair` | print the pairing code again, with a QR code to scan with the phone camera |
 | `glancecode service restart` | restart the hub; running sessions are untouched |
 
 The hub's log is at `%LOCALAPPDATA%\glancecode\logs\hub.log`, the session host's
@@ -165,6 +167,7 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 | `sttVocabulary` | | words the speech model should expect |
 | `ntfyTopic` | empty | optional phone push through ntfy when a session finishes or needs you |
 | `bindTailscaleIP` | false | also listen on the raw Tailscale IP over plain HTTP, for development |
+| `preventSleep` | true | keep the PC awake (not the display) while the hub runs and the PC is on AC power |
 
 ## Limitations
 
@@ -173,8 +176,6 @@ See [SECURITY.md](SECURITY.md) and [docs/privacy.md](docs/privacy.md).
 - The G2 display has one font weight, so markdown is shown as plain text.
 - Sessions must be started with `glancecode claude` for the glasses to type into
   them.
-- Keep-awake is not ported yet: a PC that sleeps looks like a dead hub from the
-  glasses until it wakes.
 - Voice on the CPU build is about real time, so the live preview while holding
   lags behind speech. The CUDA build (`setup-voice --cuda`) doesn't. AMD and
   Intel GPUs have no prebuilt whisper.cpp server; `whisperBin` can point at your
